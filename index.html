@@ -5,8 +5,9 @@
   <title>Chess App</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Chessboard.js CSS (CDN) -->
+  <!-- Chessboard.js CSS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+
   <style>
     body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 24px; }
     .app { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
@@ -40,24 +41,18 @@
     <div id="board" style="width: 420px;"></div>
   </div>
 
-  <!-- Vendor libs via CDN (order matters) -->
+  <!-- Load dependencies in correct order -->
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
 
   <script>
-    // Try to run Stockfish as a cross-origin Worker from CDN; fallback to in-page engine if needed.
     const STOCKFISH_CDN = 'https://cdn.jsdelivr.net/gh/niklasf/stockfish.js/src/stockfish.js';
 
     let engine;
     function createEngine() {
-      try {
-        // Many CDNs allow cross-origin workers; this usually works on Netlify.
-        return new Worker(STOCKFISH_CDN);
-      } catch (e) {
-        alert('Could not start Stockfish worker from CDN.\nIf the engine does not move, see the note in the HTML about adding stockfish.js to your repo.');
-        return null;
-      }
+      try { return new Worker(STOCKFISH_CDN); }
+      catch (e) { alert('Stockfish engine failed to load.'); return null; }
     }
 
     let game = new Chess();
@@ -73,14 +68,11 @@
 
     function onDragStart (source, piece) {
       if (game.game_over()) return false;
-
       const playerColor = colorSelect.value;
       if ((playerColor === 'white' && piece.startsWith('b')) ||
           (playerColor === 'black' && piece.startsWith('w'))) return false;
-
       if ((playerColor === 'white' && game.turn() === 'b') ||
           (playerColor === 'black' && game.turn() === 'w')) return false;
-
       return true;
     }
 
@@ -111,13 +103,12 @@
     function setEngineOptions() {
       if (!engine) return;
       engine.postMessage('uci');
-      engine.postMessage('setoption name Skill Level value ' + Number(diffSlider.value)); // 0..20
+      engine.postMessage('setoption name Skill Level value ' + Number(diffSlider.value));
       engine.postMessage('isready');
     }
 
     function engineMove() {
       if (!engine || game.game_over()) return;
-
       engine.onmessage = (e) => {
         const line = typeof e === 'string' ? e : e.data;
         if (typeof line !== 'string') return;
@@ -132,9 +123,8 @@
           if (move) updateBoardAndStatus();
         }
       };
-
       engine.postMessage('position fen ' + game.fen());
-      const ms = Math.max(100, Number(diffSlider.value) * 125); // think time scales with slider
+      const ms = Math.max(100, Number(diffSlider.value) * 125);
       engine.postMessage('go movetime ' + ms);
     }
 
@@ -148,7 +138,6 @@
     function initApp() {
       engine = createEngine();
       setEngineOptions();
-
       board = Chessboard('board', {
         draggable: true,
         position: 'start',
@@ -157,22 +146,15 @@
         onDrop,
         onSnapEnd
       });
-
       newGameBtn.addEventListener('click', () => {
         setEngineOptions();
         startNewGame();
       });
-
       diffLabel.textContent = diffSlider.value;
       startNewGame();
     }
 
     document.addEventListener('DOMContentLoaded', initApp);
-
-    // NOTE: If the engine doesn't move on Netlify due to cross-origin worker restrictions:
-    // 1) In this GitHub repo, click "Add file" → "Upload files", and upload a file named stockfish.js
-    //    (you can get it from https://cdn.jsdelivr.net/gh/niklasf/stockfish.js/src/stockfish.js).
-    // 2) Change STOCKFISH_CDN at the top to: const STOCKFISH_CDN = './stockfish.js';
   </script>
 </body>
 </html>
