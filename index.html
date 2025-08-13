@@ -2,174 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Chess App</title>
+  <title>Basic Chessboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- Chessboard.js CSS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
 
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 24px; }
-    .app { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
-    .controls { display: grid; gap: 12px; }
-    label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    #status { padding: 8px 10px; background: #f6f6f6; border-radius: 8px; min-height: 24px; }
-    @media (max-width: 800px) { .app { grid-template-columns: 1fr; } #board { margin-top: 12px; } }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, Arial, sans-serif; }
+    #board { width: 420px; }
+    @media (max-width: 480px) { #board { width: 92vw; } }
   </style>
 </head>
 <body>
-  <div class="app">
-    <div class="controls">
-      <label>
-        Play as:
-        <select id="colorSelect">
-          <option value="white">White</option>
-          <option value="black">Black</option>
-        </select>
-      </label>
+  <!-- Board container -->
+  <div id="board"></div>
 
-      <label>
-        Difficulty:
-        <input id="difficulty" type="range" min="0" max="20" value="5" />
-        <span id="diffLabel">5</span>
-      </label>
-
-      <button id="newGameBtn">New Game</button>
-      <div id="status"></div>
-    </div>
-
-    <div id="board" style="width: 420px;"></div>
-  </div>
-
-  <!-- Load dependencies in correct order -->
+  <!-- Load in correct order: jQuery -> chessboard.js -> init -->
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-
   <script>
-    // --- Create a same-origin Worker on the fly that loads Stockfish from CDN ---
-    function createStockfishWorker() {
-      const blob = new Blob(
-        [`importScripts('https://cdn.jsdelivr.net/gh/niklasf/stockfish.js/src/stockfish.js');`],
-        { type: 'application/javascript' }
-      );
-      const url = URL.createObjectURL(blob);
-      const worker = new Worker(url);
-      URL.revokeObjectURL(url); // safe to revoke after worker is created
-      return worker;
-    }
-
-    // --- Game & Board state ---
-    let engine;
-    let game = new Chess();
-    let board;
-
-    const statusEl   = document.getElementById('status');
-    const colorSel   = document.getElementById('colorSelect');
-    const diffSlider = document.getElementById('difficulty');
-    const diffLabel  = document.getElementById('diffLabel');
-    const newBtn     = document.getElementById('newGameBtn');
-
-    diffSlider.addEventListener('input', () => diffLabel.textContent = diffSlider.value);
-
-    function onDragStart(source, piece) {
-      if (game.game_over()) return false;
-
-      const playerColor = colorSel.value;
-      if ((playerColor === 'white' && piece.startsWith('b')) ||
-          (playerColor === 'black' && piece.startsWith('w'))) return false;
-
-      if ((playerColor === 'white' && game.turn() === 'b') ||
-          (playerColor === 'black' && game.turn() === 'w')) return false;
-
-      return true;
-    }
-
-    function onDrop(source, target) {
-      const move = game.move({ from: source, to: target, promotion: 'q' });
-      if (move === null) return 'snapback';
-      updateBoardAndStatus();
-      setTimeout(engineMove, 200);
-    }
-
-    function onSnapEnd() { board.position(game.fen()); }
-
-    function updateBoardAndStatus() {
-      board.position(game.fen());
-      let status = '';
-      const moveColor = (game.turn() === 'w') ? 'White' : 'Black';
-
-      if (game.in_checkmate()) {
-        status = 'Game over, ' + (moveColor === 'White' ? 'Black' : 'White') + ' wins by checkmate.';
-      } else if (game.in_draw()) {
-        status = 'Game over, draw.';
-      } else {
-        status = moveColor + ' to move' + (game.in_check() ? ' (in check)' : '');
-      }
-      statusEl.textContent = status;
-    }
-
-    // --- Engine wiring ---
-    function setEngineOptions() {
-      if (!engine) return;
-      engine.postMessage('uci');
-      engine.postMessage('setoption name Skill Level value ' + Number(diffSlider.value)); // 0..20
-      engine.postMessage('isready');
-    }
-
-    function engineMove() {
-      if (!engine || game.game_over()) return;
-
-      engine.onmessage = (e) => {
-        const line = typeof e.data === 'string' ? e.data : e;
-        if (typeof line !== 'string') return;
-
-        if (line.startsWith('bestmove')) {
-          const moveStr = line.split(' ')[1];
-          if (!moveStr || moveStr === '(none)') return;
-          const from = moveStr.slice(0, 2);
-          const to   = moveStr.slice(2, 4);
-          const promo = moveStr.slice(4, 5);
-          const mv = game.move({ from, to, promotion: promo || 'q' });
-          if (mv) updateBoardAndStatus();
-        }
-      };
-
-      engine.postMessage('position fen ' + game.fen());
-      const ms = Math.max(100, Number(diffSlider.value) * 125); // think time scales with slider
-      engine.postMessage('go movetime ' + ms);
-    }
-
-    function startNewGame() {
-      game.reset();
-      board.orientation(colorSel.value);
-      updateBoardAndStatus();
-      if (colorSel.value === 'black') setTimeout(engineMove, 250);
-    }
-
-    function initApp() {
-      engine = createStockfishWorker();
-      setEngineOptions();
-
-      board = Chessboard('board', {
-        draggable: true,
+    document.addEventListener('DOMContentLoaded', function () {
+      // Initialize a plain board in the starting position
+      Chessboard('board', {
         position: 'start',
-        orientation: colorSel.value,
-        onDragStart,
-        onDrop,
-        onSnapEnd
+        draggable: false
       });
-
-      newBtn.addEventListener('click', () => {
-        setEngineOptions();
-        startNewGame();
-      });
-
-      diffLabel.textContent = diffSlider.value;
-      startNewGame();
-    }
-
-    document.addEventListener('DOMContentLoaded', initApp);
+    });
   </script>
 </body>
 </html>
