@@ -2,196 +2,340 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Basic Chess</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chess.com Monthly Stats</title>
+  <!-- Chart.js (latest stable) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root { --light:#f0d9b5; --dark:#b58863; --accent:#3b82f6; --select:#f59e0b; }
-    body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-      background:#0b2545; color:#fff; display:flex; align-items:center; justify-content:center; min-height:100vh; }
-    .app { display:grid; gap:16px; align-items:center; justify-items:center; }
-    .topbar { display:flex; gap:12px; align-items:center; }
-    .btn { background:#111827; border:1px solid #374151; padding:.5rem .75rem; border-radius:.6rem; color:#fff; cursor:pointer; }
-    .board { display:grid; grid-template-columns: repeat(8, 70px); grid-template-rows: repeat(8, 70px);
-      border:6px solid #111827; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.4); background:#111827; }
-    .sq { display:flex; align-items:center; justify-content:center; font-size:40px; user-select:none; position:relative; }
-    .light { background:var(--light); color:#111; }
-    .dark { background:var(--dark); color:#111; }
-    .sq.select { outline:4px solid var(--select); outline-offset:-4px; }
-    .sq.target::before { content:""; width:18px; height:18px; border-radius:50%; background:rgba(59,130,246,.85); }
-    @media (max-width: 640px) {
-      .board { grid-template-columns: repeat(8, 44px); grid-template-rows: repeat(8, 44px); }
-      .sq { font-size:26px; }
+    :root {
+      --bg: #0f1420; --panel: #151c2c; --ink: #e8eefc; --muted:#9fb0d1; --accent:#5aa9ff;
     }
-    noscript { background:#111827; padding:8px 12px; border-radius:8px; }
+    html,body {margin:0;padding:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;}
+    header {padding:24px 16px; display:flex; flex-wrap:wrap; gap:12px; align-items:end; border-bottom:1px solid #223; position:sticky; top:0; backdrop-filter: blur(6px);}
+    h1 {margin:0 12px 0 0; font-size:18px; font-weight:700;}
+    label {display:block; font-size:12px; color:var(--muted); margin-bottom:6px;}
+    input, select, button {
+      background:var(--panel); color:var(--ink); border:1px solid #263147; border-radius:8px; padding:10px 12px; outline:none;
+    }
+    input:focus, select:focus {border-color:var(--accent);}
+    button {cursor:pointer; font-weight:600;}
+    .grid {display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:18px; padding:18px; max-width:1400px; margin:0 auto;}
+    .card {background:var(--panel); border:1px solid #24314a; border-radius:12px; padding:14px;}
+    .card h3 {margin:0 0 10px; font-size:14px; color:#cfe0ff; letter-spacing:0.2px;}
+    .row {display:flex; gap:12px; align-items:end; flex-wrap:wrap;}
+    .tiny {font-size:12px; color:var(--muted);}
+    #status {padding:10px 16px; color:#cfe0ff;}
+    .footer {color:var(--muted); padding:8px 18px 18px; text-align:center;}
+    canvas {width:100% !important; height:340px !important;}
+    .kpi {display:flex; gap:16px; flex-wrap:wrap;}
+    .kpi .pill {
+      background:#0e1a32; border:1px solid #24314a; border-radius:999px; padding:8px 12px; color:#cfe0ff;
+    }
   </style>
 </head>
 <body>
-  <div class="app">
-    <div class="topbar">
-      <button id="reset" class="btn">♻️ Reset</button>
-      <div id="turn">Turn: White</div>
+  <header>
+    <h1>Chess.com Monthly Stats</h1>
+    <div>
+      <label for="username">Chess.com Username</label>
+      <input id="username" placeholder="e.g., hikaru" />
     </div>
-    <div id="board" class="board" aria-label="Chess board"></div>
-    <noscript>Enable JavaScript to see the chess board.</noscript>
+    <div>
+      <label for="year">Year</label>
+      <select id="year"></select>
+    </div>
+    <div>
+      <label for="month">Month</label>
+      <select id="month"></select>
+    </div>
+    <div>
+      <button id="load">Load Stats</button>
+    </div>
+    <div class="tiny" id="status"></div>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h3>Overview</h3>
+      <div class="kpi" id="kpis"></div>
+    </section>
+
+    <section class="card">
+      <h3>Wins / Draws / Losses</h3>
+      <canvas id="wld"></canvas>
+    </section>
+
+    <section class="card">
+      <h3>Results by Color</h3>
+      <canvas id="byColor"></canvas>
+    </section>
+
+    <section class="card">
+      <h3>Top Openings (Top 5)</h3>
+      <canvas id="openings"></canvas>
+    </section>
+
+    <section class="card">
+      <h3>Time Controls</h3>
+      <canvas id="timeControls"></canvas>
+    </section>
+
+    <section class="card">
+      <h3>Rating Trend (your rating vs opponent)</h3>
+      <canvas id="ratings"></canvas>
+      <div class="tiny">Sorted by game end time.</div>
+    </section>
+  </main>
+
+  <div class="footer tiny">
+    Data courtesy of the Chess.com Published-Data API (read-only). Charts powered by Chart.js.
   </div>
 
   <script>
-    // Avoid modern syntax features so older browsers don’t choke.
-    var PIECES = {
-      w: { K:"♔", Q:"♕", R:"♖", B:"♗", N:"♘", P:"♙" },
-      b: { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟" }
-    };
+    // ------- helpers -------
+    const $ = (sel) => document.querySelector(sel);
+    const statusEl = $("#status");
+    const yearsEl = $("#year");
+    const monthsEl = $("#month");
+    const usernameEl = $("#username");
 
-    var board = [];        // 8x8 or null
-    var current = 'w';
-    var selected = null;   // {r:?, c:?}
-    var targets = {};      // plain object as a set: key "r,c" -> true
-
-    var boardEl = null, turnEl = null;
-
-    function init() {
-      boardEl = document.getElementById('board');
-      turnEl  = document.getElementById('turn');
-      document.getElementById('reset').addEventListener('click', setup);
-
-      setup();
-    }
-
-    function setup() {
-      board = emptyBoard();
-      placeStartPosition();
-      current = 'w';
-      selected = null;
-      targets = {};
-      render();
-    }
-
-    function emptyBoard() {
-      var a = [];
-      for (var r=0;r<8;r++){
-        var row = [];
-        for (var c=0;c<8;c++) row.push(null);
-        a.push(row);
+    // Populate year/month selects (last 10 years)
+    (function initPickers() {
+      const now = new Date();
+      const yNow = now.getFullYear();
+      for (let y = yNow; y >= yNow - 10; y--) {
+        const opt = document.createElement("option");
+        opt.value = String(y);
+        opt.textContent = String(y);
+        yearsEl.appendChild(opt);
       }
-      return a;
+      const monthNames = [
+        "01 - Jan","02 - Feb","03 - Mar","04 - Apr","05 - May","06 - Jun",
+        "07 - Jul","08 - Aug","09 - Sep","10 - Oct","11 - Nov","12 - Dec"
+      ];
+      monthNames.forEach((label, idx) => {
+        const opt = document.createElement("option");
+        const m = String(idx + 1).padStart(2,"0");
+        opt.value = m;
+        opt.textContent = label;
+        monthsEl.appendChild(opt);
+      });
+      yearsEl.value = String(yNow);
+      monthsEl.value = String(now.getMonth()+1).padStart(2,"0");
+    })();
+
+    // Chart refs to destroy on refresh
+    const charts = {};
+    function upsertChart(id, type, data, options) {
+      const ctx = document.getElementById(id).getContext("2d");
+      if (charts[id]) charts[id].destroy();
+      charts[id] = new Chart(ctx, { type, data, options });
     }
 
-    function placeStartPosition(){
-      var back = ["R","N","B","Q","K","B","N","R"];
-      for (var c=0;c<8;c++){ board[0][c]={t:back[c],c:'b'}; board[7][c]={t:back[c],c:'w'}; }
-      for (var c2=0;c2<8;c2++){ board[1][c2]={t:"P",c:'b'}; board[6][c2]={t:"P",c:'w'}; }
+    // Parse PGN tags simply (Opening / ECO may be present in PGN header)
+    function extractOpeningFromPGN(pgn) {
+      if (!pgn) return null;
+      // Try Opening tag first
+      const openingMatch = pgn.match(/\[Opening\s+"([^"]+)"\]/i);
+      if (openingMatch) return openingMatch[1];
+      // Fallback: ECO + variation
+      const eco = (pgn.match(/\[ECO\s+"([^"]+)"\]/i) || [])[1];
+      const varMatch = (pgn.match(/\[Variation\s+"([^"]+)"\]/i) || [])[1];
+      if (eco && varMatch) return `${eco} — ${varMatch}`;
+      if (eco) return eco;
+      return null;
     }
 
-    function render(){
-      boardEl.innerHTML = '';
-      for (var r=0;r<8;r++){
-        for (var c=0;c<8;c++){
-          var btn = document.createElement('button');
-          btn.className = 'sq ' + ((r+c)%2 ? 'dark' : 'light');
-          btn.setAttribute('data-r', r);
-          btn.setAttribute('data-c', c);
+    function niceTimeControl(tc) {
+      // Example formats: "600+0", "60+1", "1/259200" (daily), "180+2"
+      if (!tc) return "unknown";
+      if (tc.includes("/")) return "daily";
+      const [sec, inc] = tc.split("+").map(Number);
+      if (isNaN(sec)) return tc;
+      const mins = Math.round(sec/60);
+      // map to common buckets
+      if (sec <= 60) return "bullet";
+      if (sec <= 180) return "bullet";
+      if (sec <= 600) return "blitz";
+      if (sec <= 1200) return "rapid";
+      return "classical";
+    }
 
-          var piece = board[r][c];
-          if (piece) btn.textContent = PIECES[piece.c][piece.t];
+    function gameResultFor(playerUsername, game) {
+      const youAreWhite = game.white && game.white.username?.toLowerCase() === playerUsername.toLowerCase();
+      const yourSide = youAreWhite ? "white" : "black";
+      const res = (game[yourSide]?.result || "").toLowerCase();
+      // Chess.com results examples: "win", "checkmated", "resigned", "timeout", "agreed", "stalemate", "repetition", "insufficient", "abandoned"
+      if (res === "win") return "win";
+      if (["agreed","stalemate","repetition","insufficient","50move","timevsinsufficient"].includes(res)) return "draw";
+      return "loss";
+    }
 
-          if (selected && selected.r===r && selected.c===c) btn.className += ' select';
-          if (targets[r+','+c]) btn.className += ' target';
+    function fmt(num) { return new Intl.NumberFormat(undefined, {maximumFractionDigits:1}).format(num); }
 
-          btn.onclick = (function(rr,cc){ return function(){ onSquare(rr,cc); }; })(r,c);
-          boardEl.appendChild(btn);
+    async function loadMonth(username, yyyy, mm) {
+      statusEl.textContent = "Fetching games…";
+      const url = `https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/${yyyy}/${mm}`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status} — make sure the username exists and there are games for ${yyyy}-${mm}.`);
+      const data = await r.json();
+      return data.games || [];
+    }
+
+    function buildStats(username, games) {
+      const totals = {win:0, draw:0, loss:0};
+      const byColor = {white:{win:0,draw:0,loss:0}, black:{win:0,draw:0,loss:0}};
+      const openings = new Map();
+      const timeControls = new Map();
+      const ratingsSeries = []; // {t, your, opp}
+
+      // sort by end_time if present for a cleaner rating chart
+      games.sort((a,b) => (a.end_time||0) - (b.end_time||0));
+
+      for (const g of games) {
+        // result buckets
+        const res = gameResultFor(username, g);
+        totals[res]++;
+
+        const youAreWhite = g.white?.username?.toLowerCase() === username.toLowerCase();
+        const col = youAreWhite ? "white" : "black";
+        byColor[col][res]++;
+
+        // opening (prefer PGN tag)
+        const op = extractOpeningFromPGN(g.pgn) || g.opening || null;
+        if (op) openings.set(op, (openings.get(op) || 0) + 1);
+
+        // time control
+        const tc = niceTimeControl(g.time_control);
+        timeControls.set(tc, (timeControls.get(tc) || 0) + 1);
+
+        // ratings
+        const yourRating = youAreWhite ? g.white?.rating : g.black?.rating;
+        const oppRating  = youAreWhite ? g.black?.rating : g.white?.rating;
+        const t = (g.end_time || g.start_time || Date.now()*0.001) * 1000; // ms
+        ratingsSeries.push({t, your: yourRating ?? null, opp: oppRating ?? null});
+      }
+
+      // derived KPIs
+      const total = games.length;
+      const winRate = total ? (totals.win / total * 100) : 0;
+      const avgOpp = (() => {
+        const arr = games.map(g => {
+          const youAreWhite = g.white?.username?.toLowerCase() === username.toLowerCase();
+          return youAreWhite ? g.black?.rating : g.white?.rating;
+        }).filter(x => Number.isFinite(x));
+        if (!arr.length) return 0;
+        return arr.reduce((a,b)=>a+b,0)/arr.length;
+      })();
+
+      return { totals, byColor, openings, timeControls, ratingsSeries, total, winRate, avgOpp };
+    }
+
+    function renderKpis(k) {
+      const wrap = $("#kpis");
+      wrap.innerHTML = "";
+      const nodes = [
+        ["Games", k.total],
+        ["Win rate", `${fmt(k.winRate)}%`],
+        ["Avg opp rating", fmt(k.avgOpp)],
+        ["Wins", k.totals.win],
+        ["Draws", k.totals.draw],
+        ["Losses", k.totals.loss]
+      ].map(([label, val]) => {
+        const span = document.createElement("div");
+        span.className = "pill";
+        span.textContent = `${label}: ${val}`;
+        return span;
+      });
+      nodes.forEach(n => wrap.appendChild(n));
+    }
+
+    function renderCharts(username, stats) {
+      // W/D/L
+      upsertChart("wld", "doughnut", {
+        labels:["Wins","Draws","Losses"],
+        datasets:[{ data:[stats.totals.win, stats.totals.draw, stats.totals.loss] }]
+      }, { plugins:{legend:{position:"bottom"}}});
+
+      // Results by color
+      upsertChart("byColor", "bar", {
+        labels:["White","Black"],
+        datasets:[
+          {label:"Wins",  data:[stats.byColor.white.win,  stats.byColor.black.win]},
+          {label:"Draws", data:[stats.byColor.white.draw, stats.byColor.black.draw]},
+          {label:"Losses",data:[stats.byColor.white.loss, stats.byColor.black.loss]}
+        ]
+      }, {
+        responsive:true,
+        plugins:{legend:{position:"bottom"}},
+        scales:{x:{stacked:true}, y:{stacked:true, beginAtZero:true, ticks:{precision:0}}}
+      });
+
+      // Openings (top 5)
+      const topOpenings = [...stats.openings.entries()]
+        .sort((a,b)=>b[1]-a[1]).slice(0,5);
+      upsertChart("openings", "bar", {
+        labels: topOpenings.map(([name])=>name),
+        datasets:[{ label:"Games", data: topOpenings.map(([,n])=>n) }]
+      }, {
+        indexAxis:"y",
+        plugins:{legend:{display:false}},
+        scales:{x:{beginAtZero:true, ticks:{precision:0}}}
+      });
+
+      // Time Controls
+      const tcEntries = [...stats.timeControls.entries()].sort((a,b)=>b[1]-a[1]);
+      upsertChart("timeControls", "bar", {
+        labels: tcEntries.map(([k])=>k),
+        datasets:[{label:"Games", data: tcEntries.map(([,n])=>n)}]
+      }, { plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true, ticks:{precision:0}}}});
+
+      // Rating trend
+      const labels = stats.ratingsSeries.map(d => new Date(d.t));
+      const your = stats.ratingsSeries.map(d => d.your);
+      const opp  = stats.ratingsSeries.map(d => d.opp);
+      upsertChart("ratings", "line", {
+        labels,
+        datasets:[
+          {label:`${username} rating`, data: your, spanGaps:true, pointRadius:2, tension:0.2},
+          {label:`Opponent rating`,    data: opp,  spanGaps:true, pointRadius:2, tension:0.2}
+        ]
+      }, {
+        plugins:{legend:{position:"bottom"}},
+        scales:{
+          x:{type:"time", time:{unit:"day"}},
+          y:{beginAtZero:false}
         }
-      }
-      turnEl.textContent = 'Turn: ' + (current==='w'?'White':'Black');
+      });
     }
 
-    function onSquare(r,c){
-      var piece = board[r][c];
+    // Add timescale adapter (Chart.js 4 ships with date-fns adapter via auto)
+    // If your Chart.js build complains, switch x scale to 'category' above.
 
-      // select own piece
-      if (piece && piece.c===current){
-        selected = {r:r, c:c};
-        targets = legalMoves(r,c);
-        render();
-        return;
+    $("#load").addEventListener("click", async () => {
+      const username = (usernameEl.value || "").trim();
+      const yyyy = yearsEl.value;
+      const mm = monthsEl.value;
+      if (!username) { statusEl.textContent = "Enter a username."; return; }
+
+      statusEl.textContent = "Loading…";
+      try {
+        const games = await loadMonth(username, yyyy, mm);
+        statusEl.textContent = `Fetched ${games.length} games for ${username} in ${yyyy}-${mm}.`;
+        const stats = buildStats(username, games);
+        renderKpis(stats);
+        renderCharts(username, stats);
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error: " + err.message;
+        // Clear previous charts if any
+        Object.keys(charts).forEach(id => { charts[id]?.destroy(); delete charts[id]; });
+        $("#kpis").innerHTML = "";
       }
-      // move to target
-      if (selected && targets[r+','+c]){
-        move(selected.r, selected.c, r, c);
-        selected = null; targets = {};
-        current = (current==='w'?'b':'w');
-        render();
-        return;
-      }
-      // clear selection
-      selected = null; targets = {}; render();
-    }
+    });
 
-    function move(r1,c1,r2,c2){
-      var piece = board[r1][c1];
-      board[r2][c2] = piece;
-      board[r1][c1] = null;
-      // simple promotion
-      if (piece.t === 'P') {
-        if (piece.c==='w' && r2===0) board[r2][c2] = {t:'Q', c:'w'};
-        if (piece.c==='b' && r2===7) board[r2][c2] = {t:'Q', c:'b'};
-      }
-    }
-
-    function legalMoves(r,c){
-      var piece = board[r][c];
-      var out = {};
-      if (!piece) return out;
-
-      function add(rr,cc){
-        if (rr<0||rr>7||cc<0||cc>7) return false;
-        var occ = board[rr][cc];
-        if (!occ){ out[rr+','+cc] = true; return true; }
-        if (occ.c!==piece.c){ out[rr+','+cc] = true; }
-        return false;
-      }
-
-      function rays(dirs){
-        for (var i=0;i<dirs.length;i++){
-          var dr=dirs[i][0], dc=dirs[i][1], rr=r+dr, cc=c+dc;
-          while (add(rr,cc)) { rr+=dr; cc+=dc; }
-        }
-      }
-
-      if (piece.t==='P'){
-        var dir = (piece.c==='w') ? -1 : 1;
-        var start = (piece.c==='w') ? 6 : 1;
-
-        // one forward
-        if (inb(r+dir,c) && board[r+dir][c]===null) out[(r+dir)+','+c] = true;
-        // two from start
-        if (r===start && board[r+dir][c]===null && inb(r+2*dir,c) && board[r+2*dir][c]===null)
-          out[(r+2*dir)+','+c] = true;
-        // captures
-        var cc1 = c-1, cc2 = c+1, rr = r+dir;
-        if (inb(rr,cc1) && board[rr][cc1] && board[rr][cc1].c!==piece.c) out[rr+','+cc1] = true;
-        if (inb(rr,cc2) && board[rr][cc2] && board[rr][cc2].c!==piece.c) out[rr+','+cc2] = true;
-      } else if (piece.t==='N'){
-        var jumps=[[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]];
-        for (var j=0;j<jumps.length;j++) add(r+jumps[j][0], c+jumps[j][1]);
-      } else if (piece.t==='B'){ rays([[1,1],[1,-1],[-1,1],[-1,-1]]); }
-      else if (piece.t==='R'){ rays([[1,0],[-1,0],[0,1],[0,-1]]); }
-      else if (piece.t==='Q'){ rays([[1,1],[1,-1],[-1,1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]]); }
-      else if (piece.t==='K'){
-        for (var dr=-1; dr<=1; dr++)
-          for (var dc=-1; dc<=1; dc++)
-            if (dr!==0 || dc!==0) add(r+dr,c+dc);
-      }
-      return out;
-    }
-
-    function inb(r,c){ return r>=0 && r<8 && c>=0 && c<8; }
-
-    // Start after DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', init);
-    } else {
-      init();
-    }
+    // Allow pressing Enter in username to load
+    usernameEl.addEventListener("keydown", e => { if (e.key === "Enter") $("#load").click(); });
   </script>
 </body>
 </html>
