@@ -1,31 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Minimal Chessboard</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/css/chessboard.min.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Minimal Chessboard (Fixed CDN)</title>
+  <!-- Use the official unpkg dist so the piece images resolve correctly -->
+  <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
   <style>
+    html, body { height: 100%; }
     body {
-      background: #0f172a;
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
       margin: 0;
+      background: #0f172a; /* deep blue */
+      color: #e5e7eb;
+      display: grid;
+      place-items: center;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }
-    #board {
-      width: 400px;
-    }
+    #board { width: 420px; max-width: 90vw; }
   </style>
 </head>
 <body>
   <div id="board"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/js/chessboard.min.js"></script>
+  <!-- JS AFTER the #board element -->
+  <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
   <script>
-    const board = Chessboard('board', 'start');
+    // Initialize when DOM is ready (script is after the element, so it's safe)
+    const board = Chessboard('board', {
+      position: 'start',
+    });
+
+    // Resize on viewport changes to keep it responsive
+    window.addEventListener('resize', () => board.resize());
   </script>
 </body>
 </html>
