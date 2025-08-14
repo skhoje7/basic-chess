@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Minimal Chessboard (Fixed CDN)</title>
-  <!-- Use the official unpkg dist so the piece images resolve correctly -->
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Minimal Chessboard (no inline JS)</title>
+
+  <!-- Use official unpkg dist so piece images resolve -->
   <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+
   <style>
     html, body { height: 100%; }
     body {
@@ -16,22 +18,18 @@
       place-items: center;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }
+    /* Give the board a definite width so it renders */
     #board { width: 420px; max-width: 90vw; }
+    /* Helpful: if JS fails, show a hint */
+    noscript { color: #fca5a5; position: fixed; bottom: 12px; font-size: 14px; }
   </style>
 </head>
 <body>
-  <div id="board"></div>
+  <div id="board" aria-label="Chessboard"></div>
+  <noscript>JavaScript disabled — enable it to see the chessboard.</noscript>
 
-  <!-- JS AFTER the #board element -->
-  <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-  <script>
-    // Initialize when DOM is ready (script is after the element, so it's safe)
-    const board = Chessboard('board', {
-      position: 'start',
-    });
-
-    // Resize on viewport changes to keep it responsive
-    window.addEventListener('resize', () => board.resize());
-  </script>
+  <!-- Libraries first, then your app. All with defer, no inline JS. -->
+  <script defer src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+  <script defer src="./app.js"></script>
 </body>
 </html>
