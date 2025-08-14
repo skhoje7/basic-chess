@@ -1,37 +1,157 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Minimal Chessboard (Fixed CDN)</title>
-  <!-- Use the official unpkg dist so the piece images resolve correctly -->
-  <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Basic Chess</title>
   <style>
-    html, body { height: 100%; }
-    body {
-      margin: 0;
-      background: #0f172a; /* deep blue */
-      color: #e5e7eb;
-      display: grid;
-      place-items: center;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    :root { --light:#f0d9b5; --dark:#b58863; --accent:#3b82f6; --select:#f59e0b; }
+    body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+           background:#0b2545; color:#fff; display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .app { display:grid; gap:16px; align-items:center; justify-items:center; }
+    .topbar { display:flex; gap:12px; align-items:center; }
+    .btn { background:#111827; border:1px solid #374151; padding:.5rem .75rem; border-radius:.6rem; color:#fff; cursor:pointer; }
+    .btn:hover { filter:brightness(1.1); }
+    .status { font-size:14px; opacity:.9 }
+    .board { display:grid; grid-template-columns: repeat(8, 70px); grid-template-rows: repeat(8, 70px);
+             border:6px solid #111827; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.4); background:#111827; }
+    .sq { display:flex; align-items:center; justify-content:center; font-size:40px; user-select:none; position:relative; }
+    .light { background:var(--light); color:#111; }
+    .dark { background:var(--dark); color:#111; }
+    .sq.highlight::after { content:""; position:absolute; inset:6px; border:3px solid var(--accent); border-radius:10px; pointer-events:none; }
+    .sq.select { outline:4px solid var(--select); outline-offset:-4px; }
+    .sq.target::before { content:""; width:18px; height:18px; border-radius:50%; background:rgba(59,130,246,.85); }
+    .legend { display:flex; gap:10px; font-size:13px; opacity:.85; }
+    @media (max-width: 640px) {
+      .board { grid-template-columns: repeat(8, 44px); grid-template-rows: repeat(8, 44px); }
+      .sq { font-size:26px; }
     }
-    #board { width: 420px; max-width: 90vw; }
   </style>
 </head>
 <body>
-  <div id="board"></div>
+  <div class="app">
+    <div class="topbar">
+      <button id="reset" class="btn">♻️ Reset</button>
+      <div id="turn" class="status">Turn: White</div>
+      <div id="hint" class="status"></div>
+    </div>
+    <div id="board" class="board" aria-label="Chess board"></div>
+    <div class="legend">Tip: click a piece to see legal targets, then click a highlighted square to move.</div>
+  </div>
 
-  <!-- JS AFTER the #board element -->
-  <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
   <script>
-    // Initialize when DOM is ready (script is after the element, so it's safe)
-    const board = Chessboard('board', {
-      position: 'start',
-    });
+    // Unicode pieces
+    const PIECES = {
+      w: { K:"♔", Q:"♕", R:"♖", B:"♗", N:"♘", P:"♙" },
+      b: { K:"♚", Q:"♛", R:"♜", B:"♝", N:"♞", P:"♟" }
+    };
 
-    // Resize on viewport changes to keep it responsive
-    window.addEventListener('resize', () => board.resize());
-  </script>
-</body>
-</html>
+    // Board state: 8x8 array of {t: type, c: color} or null. 0,0 = a8
+    let board = [];
+    let current = 'w'; // 'w' or 'b'
+    let selected = null; // {r,c}
+    let targets = new Set();
+
+    const boardEl = document.getElementById('board');
+    const turnEl = document.getElementById('turn');
+    const hintEl = document.getElementById('hint');
+    document.getElementById('reset').addEventListener('click', init);
+
+    function init() {
+      board = emptyBoard();
+      placeStartPosition();
+      current = 'w';
+      selected = null;
+      targets.clear?.();
+      render();
+      hint('');
+    }
+
+    function emptyBoard(){ return Array.from({length:8},()=>Array(8).fill(null)); }
+
+    function placeStartPosition(){
+      const back = ["R","N","B","Q","K","B","N","R"];
+      for (let c=0;c<8;c++){ board[0][c]={t:back[c],c:'b'}; board[7][c]={t:back[c],c:'w'}; }
+      for (let c=0;c<8;c++){ board[1][c]={t:"P",c:'b'}; board[6][c]={t:"P",c:'w'}; }
+    }
+
+    function render(){
+      boardEl.innerHTML='';
+      for (let r=0;r<8;r++){
+        for (let c=0;c<8;c++){
+          const sq = document.createElement('button');
+          sq.className = `sq ${(r+c)%2? 'dark':'light'}`;
+          sq.setAttribute('data-r', r);
+          sq.setAttribute('data-c', c);
+          sq.setAttribute('aria-label', algebraic(r,c));
+          const piece = board[r][c];
+          if (piece) sq.textContent = PIECES[piece.c][piece.t];
+
+          const key = `${r},${c}`;
+          if (selected && selected.r===r && selected.c===c) sq.classList.add('select');
+          if (targets.has(key)) sq.classList.add('target','highlight');
+
+          sq.addEventListener('click', ()=>onSquare(r,c));
+          boardEl.appendChild(sq);
+        }
+      }
+      turnEl.textContent = `Turn: ${current==='w'?'White':'Black'}`;
+    }
+
+    function onSquare(r,c){
+      const piece = board[r][c];
+
+      // If selecting own piece
+      if (piece && piece.c===current){
+        selected = {r,c};
+        targets = legalMoves(r,c);
+        render();
+        return;
+      }
+      // If clicking a target from current selection
+      if (selected && targets.has(`${r},${c}`)){
+        move(selected.r, selected.c, r, c);
+        selected = null; targets.clear(); // end selection
+        current = current==='w'?'b':'w';
+        render();
+        return;
+      }
+      // Otherwise, clear selection
+      selected = null; targets.clear?.(); render();
+    }
+
+    function move(r1,c1,r2,c2){
+      const piece = board[r1][c1];
+      // basic move + promotion for pawns
+      board[r2][c2] = piece;
+      board[r1][c1] = null;
+      if (piece.t === 'P') {
+        if (piece.c==='w' && r2===0) board[r2][c2] = {t:'Q', c:'w'};
+        if (piece.c==='b' && r2===7) board[r2][c2] = {t:'Q', c:'b'};
+      }
+    }
+
+    function legalMoves(r,c){
+      const piece = board[r][c];
+      const out = new Set();
+      if (!piece) return out;
+      const add = (rr,cc)=>{
+        if (rr<0||rr>7||cc<0||cc>7) return false;
+        const occ = board[rr][cc];
+        if (!occ){ out.add(`${rr},${cc}`); return true; } // empty ok; keep ray
+        if (occ.c!==piece.c){ out.add(`${rr},${cc}`); }   // capture stops ray
+        return false;
+      };
+      const rays = (dirs)=>{
+        for (const [dr,dc] of dirs){
+          let rr=r+dr, cc=c+dc;
+          while (add(rr,cc)) { rr+=dr; cc+=dc; }
+        }
+      };
+      switch(piece.t){
+        case 'P': {
+          const dir = piece.c==='w' ? -1 : 1;
+          const start = piece.c==='w' ? 6 : 1;
+          // one forward
+          if (!board[r+dir]?.[c]) out.add(`${r+dir},${c}`);
+          // tw
