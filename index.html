@@ -1,341 +1,93 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Chess.com Monthly Stats</title>
-  <!-- Chart.js (latest stable) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    :root {
-      --bg: #0f1420; --panel: #151c2c; --ink: #e8eefc; --muted:#9fb0d1; --accent:#5aa9ff;
-    }
-    html,body {margin:0;padding:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;}
-    header {padding:24px 16px; display:flex; flex-wrap:wrap; gap:12px; align-items:end; border-bottom:1px solid #223; position:sticky; top:0; backdrop-filter: blur(6px);}
-    h1 {margin:0 12px 0 0; font-size:18px; font-weight:700;}
-    label {display:block; font-size:12px; color:var(--muted); margin-bottom:6px;}
-    input, select, button {
-      background:var(--panel); color:var(--ink); border:1px solid #263147; border-radius:8px; padding:10px 12px; outline:none;
-    }
-    input:focus, select:focus {border-color:var(--accent);}
-    button {cursor:pointer; font-weight:600;}
-    .grid {display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:18px; padding:18px; max-width:1400px; margin:0 auto;}
-    .card {background:var(--panel); border:1px solid #24314a; border-radius:12px; padding:14px;}
-    .card h3 {margin:0 0 10px; font-size:14px; color:#cfe0ff; letter-spacing:0.2px;}
-    .row {display:flex; gap:12px; align-items:end; flex-wrap:wrap;}
-    .tiny {font-size:12px; color:var(--muted);}
-    #status {padding:10px 16px; color:#cfe0ff;}
-    .footer {color:var(--muted); padding:8px 18px 18px; text-align:center;}
-    canvas {width:100% !important; height:340px !important;}
-    .kpi {display:flex; gap:16px; flex-wrap:wrap;}
-    .kpi .pill {
-      background:#0e1a32; border:1px solid #24314a; border-radius:999px; padding:8px 12px; color:#cfe0ff;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Chess.com W/L/D Chart</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; background: #0f1420; color: #fff; text-align: center; }
+  header { padding: 20px; }
+  input, select, button { padding: 6px 10px; margin: 5px; border-radius: 5px; border: none; }
+  button { cursor: pointer; background: #5aa9ff; color: white; }
+  canvas { max-width: 400px; margin-top: 20px; }
+</style>
 </head>
 <body>
-  <header>
-    <h1>Chess.com Monthly Stats</h1>
-    <div>
-      <label for="username">Chess.com Username</label>
-      <input id="username" placeholder="e.g., hikaru" />
-    </div>
-    <div>
-      <label for="year">Year</label>
-      <select id="year"></select>
-    </div>
-    <div>
-      <label for="month">Month</label>
-      <select id="month"></select>
-    </div>
-    <div>
-      <button id="load">Load Stats</button>
-    </div>
-    <div class="tiny" id="status"></div>
-  </header>
+<header>
+  <h1>Chess.com Wins/Draws/Losses</h1>
+  <input id="username" placeholder="Username" />
+  <select id="year"></select>
+  <select id="month"></select>
+  <button id="load">Load Stats</button>
+  <div id="status"></div>
+</header>
+<canvas id="wldChart"></canvas>
 
-  <main class="grid">
-    <section class="card">
-      <h3>Overview</h3>
-      <div class="kpi" id="kpis"></div>
-    </section>
+<script>
+  const yearSel = document.getElementById("year");
+  const monthSel = document.getElementById("month");
+  const now = new Date();
+  for (let y = now.getFullYear(); y >= now.getFullYear()-5; y--) {
+    let opt = document.createElement("option");
+    opt.value = y; opt.textContent = y;
+    yearSel.appendChild(opt);
+  }
+  for (let m = 1; m <= 12; m++) {
+    let opt = document.createElement("option");
+    opt.value = String(m).padStart(2,"0");
+    opt.textContent = opt.value;
+    monthSel.appendChild(opt);
+  }
+  yearSel.value = now.getFullYear();
+  monthSel.value = String(now.getMonth()+1).padStart(2,"0");
 
-    <section class="card">
-      <h3>Wins / Draws / Losses</h3>
-      <canvas id="wld"></canvas>
-    </section>
+  function gameResult(username, game) {
+    const youWhite = game.white.username.toLowerCase() === username.toLowerCase();
+    const res = youWhite ? game.white.result : game.black.result;
+    if (res === "win") return "win";
+    if (["agreed","stalemate","repetition","insufficient","50move","timevsinsufficient"].includes(res)) return "draw";
+    return "loss";
+  }
 
-    <section class="card">
-      <h3>Results by Color</h3>
-      <canvas id="byColor"></canvas>
-    </section>
+  let chart;
 
-    <section class="card">
-      <h3>Top Openings (Top 5)</h3>
-      <canvas id="openings"></canvas>
-    </section>
-
-    <section class="card">
-      <h3>Time Controls</h3>
-      <canvas id="timeControls"></canvas>
-    </section>
-
-    <section class="card">
-      <h3>Rating Trend (your rating vs opponent)</h3>
-      <canvas id="ratings"></canvas>
-      <div class="tiny">Sorted by game end time.</div>
-    </section>
-  </main>
-
-  <div class="footer tiny">
-    Data courtesy of the Chess.com Published-Data API (read-only). Charts powered by Chart.js.
-  </div>
-
-  <script>
-    // ------- helpers -------
-    const $ = (sel) => document.querySelector(sel);
-    const statusEl = $("#status");
-    const yearsEl = $("#year");
-    const monthsEl = $("#month");
-    const usernameEl = $("#username");
-
-    // Populate year/month selects (last 10 years)
-    (function initPickers() {
-      const now = new Date();
-      const yNow = now.getFullYear();
-      for (let y = yNow; y >= yNow - 10; y--) {
-        const opt = document.createElement("option");
-        opt.value = String(y);
-        opt.textContent = String(y);
-        yearsEl.appendChild(opt);
+  document.getElementById("load").addEventListener("click", async () => {
+    const username = document.getElementById("username").value.trim();
+    const year = yearSel.value;
+    const month = monthSel.value;
+    document.getElementById("status").textContent = "Loading...";
+    try {
+      const url = `https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/${year}/${month}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("No data");
+      const data = await res.json();
+      const games = data.games || [];
+      if (!games.length) {
+        document.getElementById("status").textContent = "No games found.";
+        return;
       }
-      const monthNames = [
-        "01 - Jan","02 - Feb","03 - Mar","04 - Apr","05 - May","06 - Jun",
-        "07 - Jul","08 - Aug","09 - Sep","10 - Oct","11 - Nov","12 - Dec"
-      ];
-      monthNames.forEach((label, idx) => {
-        const opt = document.createElement("option");
-        const m = String(idx + 1).padStart(2,"0");
-        opt.value = m;
-        opt.textContent = label;
-        monthsEl.appendChild(opt);
-      });
-      yearsEl.value = String(yNow);
-      monthsEl.value = String(now.getMonth()+1).padStart(2,"0");
-    })();
-
-    // Chart refs to destroy on refresh
-    const charts = {};
-    function upsertChart(id, type, data, options) {
-      const ctx = document.getElementById(id).getContext("2d");
-      if (charts[id]) charts[id].destroy();
-      charts[id] = new Chart(ctx, { type, data, options });
-    }
-
-    // Parse PGN tags simply (Opening / ECO may be present in PGN header)
-    function extractOpeningFromPGN(pgn) {
-      if (!pgn) return null;
-      // Try Opening tag first
-      const openingMatch = pgn.match(/\[Opening\s+"([^"]+)"\]/i);
-      if (openingMatch) return openingMatch[1];
-      // Fallback: ECO + variation
-      const eco = (pgn.match(/\[ECO\s+"([^"]+)"\]/i) || [])[1];
-      const varMatch = (pgn.match(/\[Variation\s+"([^"]+)"\]/i) || [])[1];
-      if (eco && varMatch) return `${eco} — ${varMatch}`;
-      if (eco) return eco;
-      return null;
-    }
-
-    function niceTimeControl(tc) {
-      // Example formats: "600+0", "60+1", "1/259200" (daily), "180+2"
-      if (!tc) return "unknown";
-      if (tc.includes("/")) return "daily";
-      const [sec, inc] = tc.split("+").map(Number);
-      if (isNaN(sec)) return tc;
-      const mins = Math.round(sec/60);
-      // map to common buckets
-      if (sec <= 60) return "bullet";
-      if (sec <= 180) return "bullet";
-      if (sec <= 600) return "blitz";
-      if (sec <= 1200) return "rapid";
-      return "classical";
-    }
-
-    function gameResultFor(playerUsername, game) {
-      const youAreWhite = game.white && game.white.username?.toLowerCase() === playerUsername.toLowerCase();
-      const yourSide = youAreWhite ? "white" : "black";
-      const res = (game[yourSide]?.result || "").toLowerCase();
-      // Chess.com results examples: "win", "checkmated", "resigned", "timeout", "agreed", "stalemate", "repetition", "insufficient", "abandoned"
-      if (res === "win") return "win";
-      if (["agreed","stalemate","repetition","insufficient","50move","timevsinsufficient"].includes(res)) return "draw";
-      return "loss";
-    }
-
-    function fmt(num) { return new Intl.NumberFormat(undefined, {maximumFractionDigits:1}).format(num); }
-
-    async function loadMonth(username, yyyy, mm) {
-      statusEl.textContent = "Fetching games…";
-      const url = `https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/${yyyy}/${mm}`;
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(`HTTP ${r.status} — make sure the username exists and there are games for ${yyyy}-${mm}.`);
-      const data = await r.json();
-      return data.games || [];
-    }
-
-    function buildStats(username, games) {
-      const totals = {win:0, draw:0, loss:0};
-      const byColor = {white:{win:0,draw:0,loss:0}, black:{win:0,draw:0,loss:0}};
-      const openings = new Map();
-      const timeControls = new Map();
-      const ratingsSeries = []; // {t, your, opp}
-
-      // sort by end_time if present for a cleaner rating chart
-      games.sort((a,b) => (a.end_time||0) - (b.end_time||0));
-
+      let win=0, draw=0, loss=0;
       for (const g of games) {
-        // result buckets
-        const res = gameResultFor(username, g);
-        totals[res]++;
-
-        const youAreWhite = g.white?.username?.toLowerCase() === username.toLowerCase();
-        const col = youAreWhite ? "white" : "black";
-        byColor[col][res]++;
-
-        // opening (prefer PGN tag)
-        const op = extractOpeningFromPGN(g.pgn) || g.opening || null;
-        if (op) openings.set(op, (openings.get(op) || 0) + 1);
-
-        // time control
-        const tc = niceTimeControl(g.time_control);
-        timeControls.set(tc, (timeControls.get(tc) || 0) + 1);
-
-        // ratings
-        const yourRating = youAreWhite ? g.white?.rating : g.black?.rating;
-        const oppRating  = youAreWhite ? g.black?.rating : g.white?.rating;
-        const t = (g.end_time || g.start_time || Date.now()*0.001) * 1000; // ms
-        ratingsSeries.push({t, your: yourRating ?? null, opp: oppRating ?? null});
+        const r = gameResult(username, g);
+        if (r==="win") win++;
+        else if (r==="draw") draw++;
+        else loss++;
       }
-
-      // derived KPIs
-      const total = games.length;
-      const winRate = total ? (totals.win / total * 100) : 0;
-      const avgOpp = (() => {
-        const arr = games.map(g => {
-          const youAreWhite = g.white?.username?.toLowerCase() === username.toLowerCase();
-          return youAreWhite ? g.black?.rating : g.white?.rating;
-        }).filter(x => Number.isFinite(x));
-        if (!arr.length) return 0;
-        return arr.reduce((a,b)=>a+b,0)/arr.length;
-      })();
-
-      return { totals, byColor, openings, timeControls, ratingsSeries, total, winRate, avgOpp };
+      document.getElementById("status").textContent = `Wins: ${win}, Draws: ${draw}, Losses: ${loss}`;
+      if (chart) chart.destroy();
+      chart = new Chart(document.getElementById("wldChart"), {
+        type: "doughnut",
+        data: {
+          labels: ["Wins","Draws","Losses"],
+          datasets: [{ data: [win, draw, loss], backgroundColor: ["#4caf50","#ffeb3b","#f44336"] }]
+        },
+        options: { responsive: true }
+      });
+    } catch (e) {
+      document.getElementById("status").textContent = "Error loading stats.";
+      console.error(e);
     }
-
-    function renderKpis(k) {
-      const wrap = $("#kpis");
-      wrap.innerHTML = "";
-      const nodes = [
-        ["Games", k.total],
-        ["Win rate", `${fmt(k.winRate)}%`],
-        ["Avg opp rating", fmt(k.avgOpp)],
-        ["Wins", k.totals.win],
-        ["Draws", k.totals.draw],
-        ["Losses", k.totals.loss]
-      ].map(([label, val]) => {
-        const span = document.createElement("div");
-        span.className = "pill";
-        span.textContent = `${label}: ${val}`;
-        return span;
-      });
-      nodes.forEach(n => wrap.appendChild(n));
-    }
-
-    function renderCharts(username, stats) {
-      // W/D/L
-      upsertChart("wld", "doughnut", {
-        labels:["Wins","Draws","Losses"],
-        datasets:[{ data:[stats.totals.win, stats.totals.draw, stats.totals.loss] }]
-      }, { plugins:{legend:{position:"bottom"}}});
-
-      // Results by color
-      upsertChart("byColor", "bar", {
-        labels:["White","Black"],
-        datasets:[
-          {label:"Wins",  data:[stats.byColor.white.win,  stats.byColor.black.win]},
-          {label:"Draws", data:[stats.byColor.white.draw, stats.byColor.black.draw]},
-          {label:"Losses",data:[stats.byColor.white.loss, stats.byColor.black.loss]}
-        ]
-      }, {
-        responsive:true,
-        plugins:{legend:{position:"bottom"}},
-        scales:{x:{stacked:true}, y:{stacked:true, beginAtZero:true, ticks:{precision:0}}}
-      });
-
-      // Openings (top 5)
-      const topOpenings = [...stats.openings.entries()]
-        .sort((a,b)=>b[1]-a[1]).slice(0,5);
-      upsertChart("openings", "bar", {
-        labels: topOpenings.map(([name])=>name),
-        datasets:[{ label:"Games", data: topOpenings.map(([,n])=>n) }]
-      }, {
-        indexAxis:"y",
-        plugins:{legend:{display:false}},
-        scales:{x:{beginAtZero:true, ticks:{precision:0}}}
-      });
-
-      // Time Controls
-      const tcEntries = [...stats.timeControls.entries()].sort((a,b)=>b[1]-a[1]);
-      upsertChart("timeControls", "bar", {
-        labels: tcEntries.map(([k])=>k),
-        datasets:[{label:"Games", data: tcEntries.map(([,n])=>n)}]
-      }, { plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true, ticks:{precision:0}}}});
-
-      // Rating trend
-      const labels = stats.ratingsSeries.map(d => new Date(d.t));
-      const your = stats.ratingsSeries.map(d => d.your);
-      const opp  = stats.ratingsSeries.map(d => d.opp);
-      upsertChart("ratings", "line", {
-        labels,
-        datasets:[
-          {label:`${username} rating`, data: your, spanGaps:true, pointRadius:2, tension:0.2},
-          {label:`Opponent rating`,    data: opp,  spanGaps:true, pointRadius:2, tension:0.2}
-        ]
-      }, {
-        plugins:{legend:{position:"bottom"}},
-        scales:{
-          x:{type:"time", time:{unit:"day"}},
-          y:{beginAtZero:false}
-        }
-      });
-    }
-
-    // Add timescale adapter (Chart.js 4 ships with date-fns adapter via auto)
-    // If your Chart.js build complains, switch x scale to 'category' above.
-
-    $("#load").addEventListener("click", async () => {
-      const username = (usernameEl.value || "").trim();
-      const yyyy = yearsEl.value;
-      const mm = monthsEl.value;
-      if (!username) { statusEl.textContent = "Enter a username."; return; }
-
-      statusEl.textContent = "Loading…";
-      try {
-        const games = await loadMonth(username, yyyy, mm);
-        statusEl.textContent = `Fetched ${games.length} games for ${username} in ${yyyy}-${mm}.`;
-        const stats = buildStats(username, games);
-        renderKpis(stats);
-        renderCharts(username, stats);
-      } catch (err) {
-        console.error(err);
-        statusEl.textContent = "Error: " + err.message;
-        // Clear previous charts if any
-        Object.keys(charts).forEach(id => { charts[id]?.destroy(); delete charts[id]; });
-        $("#kpis").innerHTML = "";
-      }
-    });
-
-    // Allow pressing Enter in username to load
-    usernameEl.addEventListener("keydown", e => { if (e.key === "Enter") $("#load").click(); });
-  </script>
+  });
+</script>
 </body>
 </html>
