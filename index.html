@@ -2,160 +2,160 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>In-Browser Chess Engine (Stockfish)</title>
+<title>Stockfish (In-Page, No Worker)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding: 16px; max-width: 760px; margin: 0 auto; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding: 16px; max-width: 800px; margin: 0 auto; }
   h1 { font-size: 18px; margin: 0 0 12px; }
   label { display:block; font-size:12px; margin: 14px 0 6px; color:#333; }
-  input, select, button, textarea { padding:10px; font-size:14px; }
-  textarea { width:100%; min-height:80px; }
+  textarea { width:100%; min-height:80px; padding:10px; font-size:14px; }
   .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-  .out { white-space:pre-wrap; background:#f6f8fb; border:1px solid #dce3f3; padding:10px; border-radius:8px; min-height:60px; }
-  .k { display:inline-block; padding:6px 10px; border:1px solid #d0d7e2; border-radius:999px; background:#fff; }
+  input, select, button { padding:10px; font-size:14px; }
+  button[disabled] { opacity:.6; cursor:not-allowed; }
+  .out { white-space:pre-wrap; background:#f6f8fb; border:1px solid #dce3f3; padding:10px; border-radius:8px; min-height:80px; }
+  .pill { display:inline-block; padding:6px 10px; border:1px solid #d0d7e2; border-radius:999px; background:#fff; }
 </style>
 </head>
 <body>
-  <h1>Chess Engine (Stockfish) — Best Move</h1>
+  <h1>Chess Engine (Stockfish, In-Page)</h1>
 
   <label>FEN</label>
-  <textarea id="fen">rn1qkbnr/pp3ppp/2p1p3/3p4/3P4/2N1PN2/PPP2PPP/R1BQKB1R w KQkq - 0 1</textarea>
+  <textarea id="fen">rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1</textarea>
 
   <div class="row">
     <label>Side to move</label>
     <select id="side">
       <option value="w">White</option>
-      <option value="b">Black</option>
+      <option value="b" selected>Black</option>
     </select>
 
-    <label>Search mode</label>
+    <label>Search</label>
     <select id="mode">
-      <option value="movetime">movetime (ms)</option>
+      <option value="movetime" selected>movetime (ms)</option>
       <option value="depth">depth (plies)</option>
     </select>
 
     <input id="amount" type="number" value="2000" min="100" step="100" />
     <label>Skill (0–20)</label>
     <input id="skill" type="number" value="10" min="0" max="20" />
-    <button id="analyze">Get Best Move</button>
+    <button id="analyze" disabled>Get Best Move</button>
   </div>
 
   <div class="row" style="margin-top:8px;">
-    <span class="k" id="status">engine: starting…</span>
+    <span class="pill" id="status">engine: loading…</span>
   </div>
 
   <label style="margin-top:12px;">Engine output</label>
   <div id="log" class="out"></div>
 
   <script>
-    // --- URLs for Stockfish (jsDelivr). v16 is strong & fast in WASM.
-    const STOCKFISH_URL = "https://cdn.jsdelivr.net/npm/stockfish@16.1.0/stockfish.js";
-
-    let engine = null;       // Worker or in-page engine object
-    let isWorker = true;     // Track mode for postMessage shape
-    let ready = false;
-
     const statusEl = document.getElementById("status");
     const logEl = document.getElementById("log");
+    const analyzeBtn = document.getElementById("analyze");
 
-    function log(line) {
-      logEl.textContent += line + "\n";
-      logEl.scrollTop = logEl.scrollHeight;
-    }
+    function setStatus(s){ statusEl.textContent = s; }
+    function log(line){ logEl.textContent += line + "\n"; logEl.scrollTop = logEl.scrollHeight; }
 
-    function send(cmd) {
-      if (!engine) return;
-      if (isWorker) engine.postMessage(cmd);
-      else engine.postMessage(cmd); // same API for in-page build
-    }
+    // Try two CDNs; load as a <script> and use the in-page STOCKFISH() factory.
+    const CDN_LIST = [
+      "https://cdn.jsdelivr.net/npm/stockfish@16.1.0/stockfish.js",
+      "https://unpkg.com/stockfish@16.1.0/stockfish.js"
+    ];
 
-    function startEngine() {
-      try {
-        engine = new Worker(STOCKFISH_URL);
-        isWorker = true;
-        hookMessages();
-      } catch (e) {
-        // Fallback: load as a script and call STOCKFISH() to get an in-page engine
-        statusEl.textContent = "engine: worker blocked; using in-page fallback";
-        const s = document.createElement("script");
-        s.src = STOCKFISH_URL;
-        s.onload = () => {
-          // global factory provided by the script
-          engine = STOCKFISH();
-          isWorker = false;
-          hookMessages();
-          bootUCI();
-        };
-        s.onerror = () => statusEl.textContent = "engine: failed to load";
-        document.head.appendChild(s);
-        return;
-      }
-      bootUCI();
-    }
+    let engine = null;
+    let ready = false;
 
-    function hookMessages() {
+    function clampSkill(v){ v = Number.isFinite(v) ? v : 10; return Math.max(0, Math.min(20, v)); }
+
+    function hookMessages(resolveReady){
       engine.onmessage = (e) => {
-        const line = (typeof e === "string") ? e : (e.data || "");
+        const line = typeof e === "string" ? e : (e.data || "");
         if (!line) return;
 
         if (line === "uciok") {
-          send("isready");
+          engine.postMessage("isready");
         } else if (line === "readyok") {
           ready = true;
-          statusEl.textContent = "engine: ready";
+          setStatus("engine: ready");
+          analyzeBtn.disabled = false;
+          resolveReady?.();
         }
 
-        // show some useful logs
-        if (line.startsWith("info ")) {
-          // Optional: throttle or parse for depth/nps/score
-        } else if (line.startsWith("bestmove")) {
-          statusEl.textContent = line;
-        }
+        if (line.startsWith("bestmove")) setStatus(line);
         log(line);
       };
     }
 
-    function bootUCI() {
-      statusEl.textContent = "engine: loading…";
-      send("uci");
-      // Set options (skill level etc.)
-      const skill = Number(document.getElementById("skill").value || 10);
-      send(`setoption name Skill Level value ${Math.max(0, Math.min(20, skill))}`);
-      // You can also set: Threads, Hash, Contempt, MultiPV, etc.
-    }
-
-    function analyzeFen(fen, sideToMove, mode, amount) {
-      if (!ready) { statusEl.textContent = "engine: not ready yet"; return; }
-      logEl.textContent = ""; // clear previous
-      statusEl.textContent = "thinking…";
-
-      send("ucinewgame");
-      // If FEN doesn't include side, enforce it from the dropdown
-      const parts = fen.trim().split(/\s+/);
-      if (parts.length >= 2) { parts[1] = sideToMove; }
-      const fixedFen = parts.join(" ");
-
-      send(`position fen ${fixedFen}`);
-      if (mode === "depth") {
-        send(`go depth ${Math.max(1, parseInt(amount||"12", 10))}`);
-      } else {
-        send(`go movetime ${Math.max(100, parseInt(amount||"2000", 10))}`);
+    async function loadEngine() {
+      for (const url of CDN_LIST) {
+        try {
+          await new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = url;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
+          // global factory exists now
+          engine = window.STOCKFISH();
+          hookMessages();
+          engine.postMessage("uci");
+          // set default skill after a beat
+          setTimeout(() => {
+            engine.postMessage(`setoption name Skill Level value ${clampSkill(+document.getElementById("skill").value)}`);
+          }, 50);
+          return; // success
+        } catch (e) {
+          // try next CDN
+        }
       }
+      setStatus("engine: failed to load (CDNs blocked?)");
     }
 
-    // UI wiring
-    document.getElementById("analyze").addEventListener("click", () => {
+    function analyze() {
+      if (!ready) { setStatus("engine: not ready yet"); return; }
+      analyzeBtn.disabled = true;
+      logEl.textContent = "";
+      setStatus("thinking…");
+
       const fen = document.getElementById("fen").value.trim();
       const side = document.getElementById("side").value;
       const mode = document.getElementById("mode").value;
-      const amount = document.getElementById("amount").value;
-      const skill = Number(document.getElementById("skill").value || 10);
-      send(`setoption name Skill Level value ${Math.max(0, Math.min(20, skill))}`);
-      analyzeFen(fen, side, mode, amount);
-    });
+      const amount = parseInt(document.getElementById("amount").value || "2000", 10);
+      const skill = clampSkill(+document.getElementById("skill").value);
 
-    // Start
-    startEngine();
+      engine.postMessage("ucinewgame");
+      engine.postMessage(`setoption name Skill Level value ${skill}`);
+
+      const parts = fen.split(/\s+/);
+      if (parts.length >= 2) parts[1] = side;
+      const fixedFen = parts.join(" ");
+
+      engine.postMessage(`position fen ${fixedFen}`);
+      if (mode === "depth") {
+        engine.postMessage(`go depth ${Math.max(1, amount || 12)}`);
+      } else {
+        engine.postMessage(`go movetime ${Math.max(100, amount || 2000)}`);
+      }
+
+      const prevHandler = engine.onmessage;
+      engine.onmessage = (e) => {
+        const line = typeof e === "string" ? e : (e.data || "");
+        if (line) {
+          if (line.startsWith("bestmove")) {
+            setStatus(line);
+            analyzeBtn.disabled = false;
+            engine.onmessage = prevHandler; // restore
+          }
+          log(line);
+        }
+      };
+    }
+
+    analyzeBtn.addEventListener("click", analyze);
+
+    // boot
+    loadEngine();
   </script>
 </body>
 </html>
