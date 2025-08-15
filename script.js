@@ -6,7 +6,7 @@ let currentIndex = 0;
 
 // Load puzzles
 async function loadPuzzles() {
-  const res = await fetch('puzzles.json');
+  const res = await fetch('./puzzles.json');
   puzzles = await res.json();
   currentIndex = 0;
   loadPuzzle(currentIndex);
