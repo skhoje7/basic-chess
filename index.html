@@ -1,93 +1,161 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Chess.com W/L/D Chart</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<meta charset="utf-8" />
+<title>In-Browser Chess Engine (Stockfish)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-  body { font-family: Arial, sans-serif; background: #0f1420; color: #fff; text-align: center; }
-  header { padding: 20px; }
-  input, select, button { padding: 6px 10px; margin: 5px; border-radius: 5px; border: none; }
-  button { cursor: pointer; background: #5aa9ff; color: white; }
-  canvas { max-width: 400px; margin-top: 20px; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding: 16px; max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  label { display:block; font-size:12px; margin: 14px 0 6px; color:#333; }
+  input, select, button, textarea { padding:10px; font-size:14px; }
+  textarea { width:100%; min-height:80px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .out { white-space:pre-wrap; background:#f6f8fb; border:1px solid #dce3f3; padding:10px; border-radius:8px; min-height:60px; }
+  .k { display:inline-block; padding:6px 10px; border:1px solid #d0d7e2; border-radius:999px; background:#fff; }
 </style>
 </head>
 <body>
-<header>
-  <h1>Chess.com Wins/Draws/Losses</h1>
-  <input id="username" placeholder="Username" />
-  <select id="year"></select>
-  <select id="month"></select>
-  <button id="load">Load Stats</button>
-  <div id="status"></div>
-</header>
-<canvas id="wldChart"></canvas>
+  <h1>Chess Engine (Stockfish) — Best Move</h1>
 
-<script>
-  const yearSel = document.getElementById("year");
-  const monthSel = document.getElementById("month");
-  const now = new Date();
-  for (let y = now.getFullYear(); y >= now.getFullYear()-5; y--) {
-    let opt = document.createElement("option");
-    opt.value = y; opt.textContent = y;
-    yearSel.appendChild(opt);
-  }
-  for (let m = 1; m <= 12; m++) {
-    let opt = document.createElement("option");
-    opt.value = String(m).padStart(2,"0");
-    opt.textContent = opt.value;
-    monthSel.appendChild(opt);
-  }
-  yearSel.value = now.getFullYear();
-  monthSel.value = String(now.getMonth()+1).padStart(2,"0");
+  <label>FEN</label>
+  <textarea id="fen">rn1qkbnr/pp3ppp/2p1p3/3p4/3P4/2N1PN2/PPP2PPP/R1BQKB1R w KQkq - 0 1</textarea>
 
-  function gameResult(username, game) {
-    const youWhite = game.white.username.toLowerCase() === username.toLowerCase();
-    const res = youWhite ? game.white.result : game.black.result;
-    if (res === "win") return "win";
-    if (["agreed","stalemate","repetition","insufficient","50move","timevsinsufficient"].includes(res)) return "draw";
-    return "loss";
-  }
+  <div class="row">
+    <label>Side to move</label>
+    <select id="side">
+      <option value="w">White</option>
+      <option value="b">Black</option>
+    </select>
 
-  let chart;
+    <label>Search mode</label>
+    <select id="mode">
+      <option value="movetime">movetime (ms)</option>
+      <option value="depth">depth (plies)</option>
+    </select>
 
-  document.getElementById("load").addEventListener("click", async () => {
-    const username = document.getElementById("username").value.trim();
-    const year = yearSel.value;
-    const month = monthSel.value;
-    document.getElementById("status").textContent = "Loading...";
-    try {
-      const url = `https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/${year}/${month}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("No data");
-      const data = await res.json();
-      const games = data.games || [];
-      if (!games.length) {
-        document.getElementById("status").textContent = "No games found.";
+    <input id="amount" type="number" value="2000" min="100" step="100" />
+    <label>Skill (0–20)</label>
+    <input id="skill" type="number" value="10" min="0" max="20" />
+    <button id="analyze">Get Best Move</button>
+  </div>
+
+  <div class="row" style="margin-top:8px;">
+    <span class="k" id="status">engine: starting…</span>
+  </div>
+
+  <label style="margin-top:12px;">Engine output</label>
+  <div id="log" class="out"></div>
+
+  <script>
+    // --- URLs for Stockfish (jsDelivr). v16 is strong & fast in WASM.
+    const STOCKFISH_URL = "https://cdn.jsdelivr.net/npm/stockfish@16.1.0/stockfish.js";
+
+    let engine = null;       // Worker or in-page engine object
+    let isWorker = true;     // Track mode for postMessage shape
+    let ready = false;
+
+    const statusEl = document.getElementById("status");
+    const logEl = document.getElementById("log");
+
+    function log(line) {
+      logEl.textContent += line + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function send(cmd) {
+      if (!engine) return;
+      if (isWorker) engine.postMessage(cmd);
+      else engine.postMessage(cmd); // same API for in-page build
+    }
+
+    function startEngine() {
+      try {
+        engine = new Worker(STOCKFISH_URL);
+        isWorker = true;
+        hookMessages();
+      } catch (e) {
+        // Fallback: load as a script and call STOCKFISH() to get an in-page engine
+        statusEl.textContent = "engine: worker blocked; using in-page fallback";
+        const s = document.createElement("script");
+        s.src = STOCKFISH_URL;
+        s.onload = () => {
+          // global factory provided by the script
+          engine = STOCKFISH();
+          isWorker = false;
+          hookMessages();
+          bootUCI();
+        };
+        s.onerror = () => statusEl.textContent = "engine: failed to load";
+        document.head.appendChild(s);
         return;
       }
-      let win=0, draw=0, loss=0;
-      for (const g of games) {
-        const r = gameResult(username, g);
-        if (r==="win") win++;
-        else if (r==="draw") draw++;
-        else loss++;
-      }
-      document.getElementById("status").textContent = `Wins: ${win}, Draws: ${draw}, Losses: ${loss}`;
-      if (chart) chart.destroy();
-      chart = new Chart(document.getElementById("wldChart"), {
-        type: "doughnut",
-        data: {
-          labels: ["Wins","Draws","Losses"],
-          datasets: [{ data: [win, draw, loss], backgroundColor: ["#4caf50","#ffeb3b","#f44336"] }]
-        },
-        options: { responsive: true }
-      });
-    } catch (e) {
-      document.getElementById("status").textContent = "Error loading stats.";
-      console.error(e);
+      bootUCI();
     }
-  });
-</script>
+
+    function hookMessages() {
+      engine.onmessage = (e) => {
+        const line = (typeof e === "string") ? e : (e.data || "");
+        if (!line) return;
+
+        if (line === "uciok") {
+          send("isready");
+        } else if (line === "readyok") {
+          ready = true;
+          statusEl.textContent = "engine: ready";
+        }
+
+        // show some useful logs
+        if (line.startsWith("info ")) {
+          // Optional: throttle or parse for depth/nps/score
+        } else if (line.startsWith("bestmove")) {
+          statusEl.textContent = line;
+        }
+        log(line);
+      };
+    }
+
+    function bootUCI() {
+      statusEl.textContent = "engine: loading…";
+      send("uci");
+      // Set options (skill level etc.)
+      const skill = Number(document.getElementById("skill").value || 10);
+      send(`setoption name Skill Level value ${Math.max(0, Math.min(20, skill))}`);
+      // You can also set: Threads, Hash, Contempt, MultiPV, etc.
+    }
+
+    function analyzeFen(fen, sideToMove, mode, amount) {
+      if (!ready) { statusEl.textContent = "engine: not ready yet"; return; }
+      logEl.textContent = ""; // clear previous
+      statusEl.textContent = "thinking…";
+
+      send("ucinewgame");
+      // If FEN doesn't include side, enforce it from the dropdown
+      const parts = fen.trim().split(/\s+/);
+      if (parts.length >= 2) { parts[1] = sideToMove; }
+      const fixedFen = parts.join(" ");
+
+      send(`position fen ${fixedFen}`);
+      if (mode === "depth") {
+        send(`go depth ${Math.max(1, parseInt(amount||"12", 10))}`);
+      } else {
+        send(`go movetime ${Math.max(100, parseInt(amount||"2000", 10))}`);
+      }
+    }
+
+    // UI wiring
+    document.getElementById("analyze").addEventListener("click", () => {
+      const fen = document.getElementById("fen").value.trim();
+      const side = document.getElementById("side").value;
+      const mode = document.getElementById("mode").value;
+      const amount = document.getElementById("amount").value;
+      const skill = Number(document.getElementById("skill").value || 10);
+      send(`setoption name Skill Level value ${Math.max(0, Math.min(20, skill))}`);
+      analyzeFen(fen, side, mode, amount);
+    });
+
+    // Start
+    startEngine();
+  </script>
 </body>
 </html>
