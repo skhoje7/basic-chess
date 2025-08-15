@@ -9,18 +9,34 @@
   },
   {
     "id": 2,
-    "title": "Tactic: Fork (Black to move)",
+    "title": "Tactic: Knight Fork (Black to move)",
     "fen": "r1bqk2r/ppp2ppp/2n2n2/3p4/3P4/2PB1N2/PP3PPP/RNBQ1RK1 b kq - 2 6",
-    "bestLineSAN": ["Be7", "Re1", "O-O", "Ne5"],
+    "bestLineSAN": ["Bg4", "Re1+", "Be7"],
     "sideToMove": "b",
-    "hint": "Develop and castle; the fork arrives after central pressure."
+    "hint": "Pin, then develop with tempo."
   },
   {
     "id": 3,
-    "title": "Mate idea (White to move)",
+    "title": "Back Rank Mate (White to move)",
     "fen": "6k1/5ppp/8/8/8/5Q2/5PPP/6K1 w - - 0 1",
     "bestLineSAN": ["Qa8#"],
     "sideToMove": "w",
-    "hint": "Back-rank geometry."
+    "hint": "Classic back rank finish."
+  },
+  {
+    "id": 4,
+    "title": "Smothered Mate (Black to move)",
+    "fen": "rn2kb1r/ppp2ppp/8/3qp3/3n4/3B1N2/PP3PPP/RNBQR1K1 b kq - 0 10",
+    "bestLineSAN": ["Qxg2+", "Kxg2", "Bh3+", "Kg1", "Nxf3#"],
+    "sideToMove": "b",
+    "hint": "Start with a queen sacrifice."
+  },
+  {
+    "id": 5,
+    "title": "Simple Mate (White to move)",
+    "fen": "7k/6pp/8/8/8/8/5PPP/6KQ w - - 0 1",
+    "bestLineSAN": ["Qa8#"],
+    "sideToMove": "w",
+    "hint": "Only one move gives mate."
   }
 ]
