@@ -1,270 +1,41 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Basic Chess — No Libraries</title>
-<style>
-  :root {
-    --light: #f0d9b5;
-    --dark:  #b58863;
-    --hl:    #9ad9f0;
-    --sel:   #ffd166;
-    --bg:    #0f1420;
-    --ink:   #e7eefc;
-  }
-  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial; display:grid; place-items:center; min-height:100dvh; }
-  .wrap { display:grid; gap:14px; padding:16px; }
-  h1 { margin:0; font-size:18px; text-align:center; }
-  .topbar { display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; }
-  .btn {
-    background:#17233d; color:#cfe0ff; border:1px solid #2a3a63; border-radius:8px; padding:8px 12px; cursor:pointer;
-  }
-  .btn:active { transform: translateY(1px); }
-  .tag { padding:6px 10px; border:1px solid #2a3a63; border-radius:999px; background:#111a31; color:#cfe0ff; }
-  .board {
-    width:min(92vw, 560px);
-    aspect-ratio: 1/1;
-    display:grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
-    border:8px solid #0b1226; border-radius:8px; box-shadow: 0 4px 24px rgba(0,0,0,.35);
-    user-select:none;
-  }
-  .sq {
-    display:grid; place-items:center; font-size: clamp(22px, 6.8vw, 42px);
-    position:relative; cursor:pointer;
-  }
-  .sq.light { background:var(--light); }
-  .sq.dark  { background:var(--dark); }
-  .sq.sel::after {
-    content:""; position:absolute; inset:0; outline:4px solid var(--sel); outline-offset:-4px;
-  }
-  .sq.hl { box-shadow: inset 0 0 0 4px var(--hl); }
-  .sq.hl::before { content:""; width:34%; height:34%; border-radius:50%; background:rgba(0,0,0,.18); }
-  .sq.cap.hl::before { width:66%; height:66%; background:rgba(200,0,0,.18); }
-  .piece { pointer-events:none; }
-  .note { opacity:.8; text-align:center; max-width:min(92vw, 560px); }
-</style>
+  <meta charset="utf-8" />
+  <title>Chess Puzzles</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Chessboard web component (easy to use) -->
+  <script type="module" src="https://unpkg.com/chessboard-element/bundled/chessboard-element.bundled.js"></script>
+
+  <!-- Chess rules/engine for legal moves -->
+  <script src="https://unpkg.com/chess.js@1.0.0/dist/chess.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="wrap">
-    <h1>Basic Chess (two-player)</h1>
-    <div class="topbar">
-      <span class="tag" id="turnTag">Turn: White</span>
-      <button class="btn" id="undoBtn">Undo</button>
-      <button class="btn" id="resetBtn">Reset</button>
+  <div class="app">
+    <h1>⏳ Daily Chess Puzzles</h1>
+
+    <div class="controls">
+      <button id="prevBtn">◀ Previous</button>
+      <button id="nextBtn">Next ▶</button>
+      <button id="hintBtn">💡 Hint</button>
+      <button id="resetBtn">↺ Reset</button>
+      <span id="status">Loading…</span>
     </div>
-    <div id="board" class="board" aria-label="chessboard"></div>
-    <div class="note">Rules kept simple: legal moves (no self-jumps), pawn moves/captures, auto-promote to queen. No check/checkmate detection, no castling, no en passant.</div>
+
+    <!-- The chessboard; draggable pieces on -->
+    <chess-board id="board" draggable-pieces></chess-board>
+
+    <details class="solution">
+      <summary>Show solution</summary>
+      <pre id="solutionText">Solution appears here.</pre>
+    </details>
+
+    <p class="note">Tip: Move the correct piece to follow the best line. If you go wrong, you’ll get a gentle nudge.</p>
   </div>
 
-<script>
-/*
-  Minimal chess for two humans.
-  Board indexing: 0..63, a8..h1 (row 0 = a8..h8). We store pieces as strings: 'wP','wR','wN','wB','wQ','wK','bP',...
-*/
-
-const boardEl = document.getElementById('board');
-const turnTag = document.getElementById('turnTag');
-const undoBtn = document.getElementById('undoBtn');
-const resetBtn = document.getElementById('resetBtn');
-
-const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
-// Unicode symbols
-const SYMBOL = {
-  wK:"♔", wQ:"♕", wR:"♖", wB:"♗", wN:"♘", wP:"♙",
-  bK:"♚", bQ:"♛", bR:"♜", bB:"♝", bN:"♞", bP:"♟︎"
-};
-
-let board = Array(64).fill(null); // squares 0..63
-let whiteToMove = true;
-let selected = null;        // index or null
-let highlights = new Set(); // legal target squares
-let history = [];           // stack of moves for undo
-
-function sqToRC(i){ return {r: Math.floor(i/8), c: i%8}; }
-function rcToSq(r,c){ return r*8 + c; }
-function inBounds(r,c){ return r>=0 && r<8 && c>=0 && c<8; }
-function pieceColor(p){ return p ? p[0] : null; }
-function isWhite(p){ return p && p[0]==='w'; }
-function isBlack(p){ return p && p[0]==='b'; }
-
-function loadFEN(fen){
-  board.fill(null);
-  let r=0, c=0;
-  for (const ch of fen.replace(/\s+.*/,'').split('').concat(['/'])) {
-    if (ch === '/') { r++; c=0; continue; }
-    if (/[1-8]/.test(ch)) { c += Number(ch); continue; }
-    if (/[prnbqkPRNBQK]/.test(ch)) {
-      const color = ch===ch.toUpperCase() ? 'w':'b';
-      const type = ch.toUpperCase();
-      const map = {P:'P',R:'R',N:'N',B:'B',Q:'Q',K:'K'};
-      board[rcToSq(r,c)] = color + map[type];
-      c++;
-    }
-  }
-  whiteToMove = true;
-  selected = null;
-  highlights.clear();
-  history = [];
-  draw();
-}
-
-function draw(){
-  boardEl.innerHTML = '';
-  for (let i=0;i<64;i++){
-    const {r,c} = sqToRC(i);
-    const light = (r+c)%2===0;
-    const div = document.createElement('div');
-    div.className = `sq ${light?'light':'dark'}${i===selected?' sel':''}${highlights.has(i)?' hl':''}`;
-    const piece = board[i];
-    if (piece) {
-      const sp = document.createElement('div');
-      sp.className = 'piece';
-      sp.textContent = SYMBOL[piece];
-      div.appendChild(sp);
-    }
-    if (highlights.has(i) && board[i]) div.classList.add('cap'); // capture marker
-    div.dataset.index = i;
-    div.addEventListener('click', onSquareClick);
-    boardEl.appendChild(div);
-  }
-  turnTag.textContent = `Turn: ${whiteToMove?'White':'Black'}`;
-}
-
-function onSquareClick(e){
-  const i = Number(e.currentTarget.dataset.index);
-  const p = board[i];
-
-  // If selecting own piece
-  if (p && ((whiteToMove && isWhite(p)) || (!whiteToMove && isBlack(p)))) {
-    selected = i;
-    highlights = legalMoves(i);
-    draw();
-    return;
-  }
-
-  // If clicking a highlighted destination, make the move
-  if (selected!==null && highlights.has(i)) {
-    makeMove(selected, i);
-    selected = null;
-    highlights.clear();
-    draw();
-    return;
-  }
-
-  // Otherwise clear selection
-  selected = null;
-  highlights.clear();
-  draw();
-}
-
-function makeMove(from, to){
-  const mover = board[from];
-  const captured = board[to];
-
-  // move piece
-  board[to] = mover;
-  board[from] = null;
-
-  // pawn promotion (auto to queen)
-  const {r:tr} = sqToRC(to);
-  if (mover === 'wP' && tr===0) board[to] = 'wQ';
-  if (mover === 'bP' && tr===7) board[to] = 'bQ';
-
-  // push history for undo
-  history.push({from,to,mover,captured, prevTurn: whiteToMove});
-
-  // toggle turn
-  whiteToMove = !whiteToMove;
-}
-
-function undo(){
-  const last = history.pop();
-  if (!last) return;
-  board[last.from] = last.mover;
-  board[last.to] = last.captured;
-  whiteToMove = last.prevTurn;
-  selected = null; highlights.clear();
-  draw();
-}
-
-undoBtn.addEventListener('click', undo);
-resetBtn.addEventListener('click', ()=>loadFEN(START_FEN));
-
-/* --------- MOVE GENERATION (pseudo-legal, no check detection) ---------- */
-function legalMoves(i){
-  const p = board[i];
-  if (!p) return new Set();
-  const color = pieceColor(p); // 'w' or 'b'
-  const {r,c} = sqToRC(i);
-  const add = (set, r,c) => { if (inBounds(r,c)) {
-      const idx = rcToSq(r,c);
-      const target = board[idx];
-      if (!target || pieceColor(target)!==color) set.add(idx);
-  }};
-  const occ = (r,c)=> inBounds(r,c) ? board[rcToSq(r,c)] : null;
-
-  const moves = new Set();
-
-  switch(p.slice(1)) {
-    case 'P': {
-      const dir = color==='w' ? -1 : 1;
-      const startRank = color==='w' ? 6 : 1;
-      // single push
-      if (inBounds(r+dir,c) && !occ(r+dir,c)) {
-        moves.add(rcToSq(r+dir,c));
-        // double push
-        if (r===startRank && !occ(r+2*dir,c)) moves.add(rcToSq(r+2*dir,c));
-      }
-      // captures
-      for (const dc of [-1,1]) {
-        const rr=r+dir, cc=c+dc;
-        if (inBounds(rr,cc)) {
-          const t = occ(rr,cc);
-          if (t && pieceColor(t)!==color) moves.add(rcToSq(rr,cc));
-        }
-      }
-      break;
-    }
-    case 'N': {
-      const jumps = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
-      for (const [dr,dc] of jumps) add(moves, r+dr, c+dc);
-      break;
-    }
-    case 'B': slide(moves, r,c, [[-1,-1],[-1,1],[1,-1],[1,1]]); break;
-    case 'R': slide(moves, r,c, [[-1,0],[1,0],[0,-1],[0,1]]); break;
-    case 'Q': slide(moves, r,c, [[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]]); break;
-    case 'K': {
-      const kings = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
-      for (const [dr,dc] of kings) add(moves, r+dr, c+dc);
-      // No castling in this simple app
-      break;
-    }
-  }
-  // filter out landing on same color handled by add()/slide
-  return moves;
-
-  function slide(set, r0,c0, dirs) {
-    for (const [dr,dc] of dirs) {
-      let rr=r0+dr, cc=c0+dc;
-      while (inBounds(rr,cc)) {
-        const t = occ(rr,cc);
-        if (!t) set.add(rcToSq(rr,cc));
-        else {
-          if (pieceColor(t)!==color) set.add(rcToSq(rr,cc));
-          break;
-        }
-        rr+=dr; cc+=dc;
-      }
-    }
-  }
-}
-
-/* --------- Build squares ---------- */
-(function buildBoard(){
-  // Squares get created in draw(); just load starting setup.
-  loadFEN(START_FEN);
-})();
-</script>
+  <script src="script.js"></script>
 </body>
 </html>
