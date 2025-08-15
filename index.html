@@ -2,160 +2,269 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Stockfish (In-Page, No Worker)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Basic Chess — No Libraries</title>
 <style>
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding: 16px; max-width: 800px; margin: 0 auto; }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  label { display:block; font-size:12px; margin: 14px 0 6px; color:#333; }
-  textarea { width:100%; min-height:80px; padding:10px; font-size:14px; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-  input, select, button { padding:10px; font-size:14px; }
-  button[disabled] { opacity:.6; cursor:not-allowed; }
-  .out { white-space:pre-wrap; background:#f6f8fb; border:1px solid #dce3f3; padding:10px; border-radius:8px; min-height:80px; }
-  .pill { display:inline-block; padding:6px 10px; border:1px solid #d0d7e2; border-radius:999px; background:#fff; }
+  :root {
+    --light: #f0d9b5;
+    --dark:  #b58863;
+    --hl:    #9ad9f0;
+    --sel:   #ffd166;
+    --bg:    #0f1420;
+    --ink:   #e7eefc;
+  }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial; display:grid; place-items:center; min-height:100dvh; }
+  .wrap { display:grid; gap:14px; padding:16px; }
+  h1 { margin:0; font-size:18px; text-align:center; }
+  .topbar { display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; }
+  .btn {
+    background:#17233d; color:#cfe0ff; border:1px solid #2a3a63; border-radius:8px; padding:8px 12px; cursor:pointer;
+  }
+  .btn:active { transform: translateY(1px); }
+  .tag { padding:6px 10px; border:1px solid #2a3a63; border-radius:999px; background:#111a31; color:#cfe0ff; }
+  .board {
+    width:min(92vw, 560px);
+    aspect-ratio: 1/1;
+    display:grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    border:8px solid #0b1226; border-radius:8px; box-shadow: 0 4px 24px rgba(0,0,0,.35);
+    user-select:none;
+  }
+  .sq {
+    display:grid; place-items:center; font-size: clamp(22px, 6.8vw, 42px);
+    position:relative; cursor:pointer;
+  }
+  .sq.light { background:var(--light); }
+  .sq.dark  { background:var(--dark); }
+  .sq.sel::after {
+    content:""; position:absolute; inset:0; outline:4px solid var(--sel); outline-offset:-4px;
+  }
+  .sq.hl { box-shadow: inset 0 0 0 4px var(--hl); }
+  .sq.hl::before { content:""; width:34%; height:34%; border-radius:50%; background:rgba(0,0,0,.18); }
+  .sq.cap.hl::before { width:66%; height:66%; background:rgba(200,0,0,.18); }
+  .piece { pointer-events:none; }
+  .note { opacity:.8; text-align:center; max-width:min(92vw, 560px); }
 </style>
 </head>
 <body>
-  <h1>Chess Engine (Stockfish, In-Page)</h1>
-
-  <label>FEN</label>
-  <textarea id="fen">rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1</textarea>
-
-  <div class="row">
-    <label>Side to move</label>
-    <select id="side">
-      <option value="w">White</option>
-      <option value="b" selected>Black</option>
-    </select>
-
-    <label>Search</label>
-    <select id="mode">
-      <option value="movetime" selected>movetime (ms)</option>
-      <option value="depth">depth (plies)</option>
-    </select>
-
-    <input id="amount" type="number" value="2000" min="100" step="100" />
-    <label>Skill (0–20)</label>
-    <input id="skill" type="number" value="10" min="0" max="20" />
-    <button id="analyze" disabled>Get Best Move</button>
+  <div class="wrap">
+    <h1>Basic Chess (two-player)</h1>
+    <div class="topbar">
+      <span class="tag" id="turnTag">Turn: White</span>
+      <button class="btn" id="undoBtn">Undo</button>
+      <button class="btn" id="resetBtn">Reset</button>
+    </div>
+    <div id="board" class="board" aria-label="chessboard"></div>
+    <div class="note">Rules kept simple: legal moves (no self-jumps), pawn moves/captures, auto-promote to queen. No check/checkmate detection, no castling, no en passant.</div>
   </div>
 
-  <div class="row" style="margin-top:8px;">
-    <span class="pill" id="status">engine: loading…</span>
-  </div>
+<script>
+/*
+  Minimal chess for two humans.
+  Board indexing: 0..63, a8..h1 (row 0 = a8..h8). We store pieces as strings: 'wP','wR','wN','wB','wQ','wK','bP',...
+*/
 
-  <label style="margin-top:12px;">Engine output</label>
-  <div id="log" class="out"></div>
+const boardEl = document.getElementById('board');
+const turnTag = document.getElementById('turnTag');
+const undoBtn = document.getElementById('undoBtn');
+const resetBtn = document.getElementById('resetBtn');
 
-  <script>
-    const statusEl = document.getElementById("status");
-    const logEl = document.getElementById("log");
-    const analyzeBtn = document.getElementById("analyze");
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+// Unicode symbols
+const SYMBOL = {
+  wK:"♔", wQ:"♕", wR:"♖", wB:"♗", wN:"♘", wP:"♙",
+  bK:"♚", bQ:"♛", bR:"♜", bB:"♝", bN:"♞", bP:"♟︎"
+};
 
-    function setStatus(s){ statusEl.textContent = s; }
-    function log(line){ logEl.textContent += line + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+let board = Array(64).fill(null); // squares 0..63
+let whiteToMove = true;
+let selected = null;        // index or null
+let highlights = new Set(); // legal target squares
+let history = [];           // stack of moves for undo
 
-    // Try two CDNs; load as a <script> and use the in-page STOCKFISH() factory.
-    const CDN_LIST = [
-      "https://cdn.jsdelivr.net/npm/stockfish@16.1.0/stockfish.js",
-      "https://unpkg.com/stockfish@16.1.0/stockfish.js"
-    ];
+function sqToRC(i){ return {r: Math.floor(i/8), c: i%8}; }
+function rcToSq(r,c){ return r*8 + c; }
+function inBounds(r,c){ return r>=0 && r<8 && c>=0 && c<8; }
+function pieceColor(p){ return p ? p[0] : null; }
+function isWhite(p){ return p && p[0]==='w'; }
+function isBlack(p){ return p && p[0]==='b'; }
 
-    let engine = null;
-    let ready = false;
-
-    function clampSkill(v){ v = Number.isFinite(v) ? v : 10; return Math.max(0, Math.min(20, v)); }
-
-    function hookMessages(resolveReady){
-      engine.onmessage = (e) => {
-        const line = typeof e === "string" ? e : (e.data || "");
-        if (!line) return;
-
-        if (line === "uciok") {
-          engine.postMessage("isready");
-        } else if (line === "readyok") {
-          ready = true;
-          setStatus("engine: ready");
-          analyzeBtn.disabled = false;
-          resolveReady?.();
-        }
-
-        if (line.startsWith("bestmove")) setStatus(line);
-        log(line);
-      };
+function loadFEN(fen){
+  board.fill(null);
+  let r=0, c=0;
+  for (const ch of fen.replace(/\s+.*/,'').split('').concat(['/'])) {
+    if (ch === '/') { r++; c=0; continue; }
+    if (/[1-8]/.test(ch)) { c += Number(ch); continue; }
+    if (/[prnbqkPRNBQK]/.test(ch)) {
+      const color = ch===ch.toUpperCase() ? 'w':'b';
+      const type = ch.toUpperCase();
+      const map = {P:'P',R:'R',N:'N',B:'B',Q:'Q',K:'K'};
+      board[rcToSq(r,c)] = color + map[type];
+      c++;
     }
+  }
+  whiteToMove = true;
+  selected = null;
+  highlights.clear();
+  history = [];
+  draw();
+}
 
-    async function loadEngine() {
-      for (const url of CDN_LIST) {
-        try {
-          await new Promise((resolve, reject) => {
-            const s = document.createElement("script");
-            s.src = url;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-          });
-          // global factory exists now
-          engine = window.STOCKFISH();
-          hookMessages();
-          engine.postMessage("uci");
-          // set default skill after a beat
-          setTimeout(() => {
-            engine.postMessage(`setoption name Skill Level value ${clampSkill(+document.getElementById("skill").value)}`);
-          }, 50);
-          return; // success
-        } catch (e) {
-          // try next CDN
+function draw(){
+  boardEl.innerHTML = '';
+  for (let i=0;i<64;i++){
+    const {r,c} = sqToRC(i);
+    const light = (r+c)%2===0;
+    const div = document.createElement('div');
+    div.className = `sq ${light?'light':'dark'}${i===selected?' sel':''}${highlights.has(i)?' hl':''}`;
+    const piece = board[i];
+    if (piece) {
+      const sp = document.createElement('div');
+      sp.className = 'piece';
+      sp.textContent = SYMBOL[piece];
+      div.appendChild(sp);
+    }
+    if (highlights.has(i) && board[i]) div.classList.add('cap'); // capture marker
+    div.dataset.index = i;
+    div.addEventListener('click', onSquareClick);
+    boardEl.appendChild(div);
+  }
+  turnTag.textContent = `Turn: ${whiteToMove?'White':'Black'}`;
+}
+
+function onSquareClick(e){
+  const i = Number(e.currentTarget.dataset.index);
+  const p = board[i];
+
+  // If selecting own piece
+  if (p && ((whiteToMove && isWhite(p)) || (!whiteToMove && isBlack(p)))) {
+    selected = i;
+    highlights = legalMoves(i);
+    draw();
+    return;
+  }
+
+  // If clicking a highlighted destination, make the move
+  if (selected!==null && highlights.has(i)) {
+    makeMove(selected, i);
+    selected = null;
+    highlights.clear();
+    draw();
+    return;
+  }
+
+  // Otherwise clear selection
+  selected = null;
+  highlights.clear();
+  draw();
+}
+
+function makeMove(from, to){
+  const mover = board[from];
+  const captured = board[to];
+
+  // move piece
+  board[to] = mover;
+  board[from] = null;
+
+  // pawn promotion (auto to queen)
+  const {r:tr} = sqToRC(to);
+  if (mover === 'wP' && tr===0) board[to] = 'wQ';
+  if (mover === 'bP' && tr===7) board[to] = 'bQ';
+
+  // push history for undo
+  history.push({from,to,mover,captured, prevTurn: whiteToMove});
+
+  // toggle turn
+  whiteToMove = !whiteToMove;
+}
+
+function undo(){
+  const last = history.pop();
+  if (!last) return;
+  board[last.from] = last.mover;
+  board[last.to] = last.captured;
+  whiteToMove = last.prevTurn;
+  selected = null; highlights.clear();
+  draw();
+}
+
+undoBtn.addEventListener('click', undo);
+resetBtn.addEventListener('click', ()=>loadFEN(START_FEN));
+
+/* --------- MOVE GENERATION (pseudo-legal, no check detection) ---------- */
+function legalMoves(i){
+  const p = board[i];
+  if (!p) return new Set();
+  const color = pieceColor(p); // 'w' or 'b'
+  const {r,c} = sqToRC(i);
+  const add = (set, r,c) => { if (inBounds(r,c)) {
+      const idx = rcToSq(r,c);
+      const target = board[idx];
+      if (!target || pieceColor(target)!==color) set.add(idx);
+  }};
+  const occ = (r,c)=> inBounds(r,c) ? board[rcToSq(r,c)] : null;
+
+  const moves = new Set();
+
+  switch(p.slice(1)) {
+    case 'P': {
+      const dir = color==='w' ? -1 : 1;
+      const startRank = color==='w' ? 6 : 1;
+      // single push
+      if (inBounds(r+dir,c) && !occ(r+dir,c)) {
+        moves.add(rcToSq(r+dir,c));
+        // double push
+        if (r===startRank && !occ(r+2*dir,c)) moves.add(rcToSq(r+2*dir,c));
+      }
+      // captures
+      for (const dc of [-1,1]) {
+        const rr=r+dir, cc=c+dc;
+        if (inBounds(rr,cc)) {
+          const t = occ(rr,cc);
+          if (t && pieceColor(t)!==color) moves.add(rcToSq(rr,cc));
         }
       }
-      setStatus("engine: failed to load (CDNs blocked?)");
+      break;
     }
+    case 'N': {
+      const jumps = [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]];
+      for (const [dr,dc] of jumps) add(moves, r+dr, c+dc);
+      break;
+    }
+    case 'B': slide(moves, r,c, [[-1,-1],[-1,1],[1,-1],[1,1]]); break;
+    case 'R': slide(moves, r,c, [[-1,0],[1,0],[0,-1],[0,1]]); break;
+    case 'Q': slide(moves, r,c, [[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]]); break;
+    case 'K': {
+      const kings = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+      for (const [dr,dc] of kings) add(moves, r+dr, c+dc);
+      // No castling in this simple app
+      break;
+    }
+  }
+  // filter out landing on same color handled by add()/slide
+  return moves;
 
-    function analyze() {
-      if (!ready) { setStatus("engine: not ready yet"); return; }
-      analyzeBtn.disabled = true;
-      logEl.textContent = "";
-      setStatus("thinking…");
-
-      const fen = document.getElementById("fen").value.trim();
-      const side = document.getElementById("side").value;
-      const mode = document.getElementById("mode").value;
-      const amount = parseInt(document.getElementById("amount").value || "2000", 10);
-      const skill = clampSkill(+document.getElementById("skill").value);
-
-      engine.postMessage("ucinewgame");
-      engine.postMessage(`setoption name Skill Level value ${skill}`);
-
-      const parts = fen.split(/\s+/);
-      if (parts.length >= 2) parts[1] = side;
-      const fixedFen = parts.join(" ");
-
-      engine.postMessage(`position fen ${fixedFen}`);
-      if (mode === "depth") {
-        engine.postMessage(`go depth ${Math.max(1, amount || 12)}`);
-      } else {
-        engine.postMessage(`go movetime ${Math.max(100, amount || 2000)}`);
-      }
-
-      const prevHandler = engine.onmessage;
-      engine.onmessage = (e) => {
-        const line = typeof e === "string" ? e : (e.data || "");
-        if (line) {
-          if (line.startsWith("bestmove")) {
-            setStatus(line);
-            analyzeBtn.disabled = false;
-            engine.onmessage = prevHandler; // restore
-          }
-          log(line);
+  function slide(set, r0,c0, dirs) {
+    for (const [dr,dc] of dirs) {
+      let rr=r0+dr, cc=c0+dc;
+      while (inBounds(rr,cc)) {
+        const t = occ(rr,cc);
+        if (!t) set.add(rcToSq(rr,cc));
+        else {
+          if (pieceColor(t)!==color) set.add(rcToSq(rr,cc));
+          break;
         }
-      };
+        rr+=dr; cc+=dc;
+      }
     }
+  }
+}
 
-    analyzeBtn.addEventListener("click", analyze);
-
-    // boot
-    loadEngine();
-  </script>
+/* --------- Build squares ---------- */
+(function buildBoard(){
+  // Squares get created in draw(); just load starting setup.
+  loadFEN(START_FEN);
+})();
+</script>
 </body>
 </html>
